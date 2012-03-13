@@ -8,6 +8,7 @@ pkgname=synaptics-xrandr
 _pkgname=xf86-input-synaptics
 pkgver=1.5.99
 pkgrel=0.2
+_gitver=dfc3a8ed713c2878407c6443c4d3092da3125e0c
 pkgdesc="Synaptics driver for notebook touchpads with patch to enable axis rotation."
 arch=('i686' 'x86_64')
 license=('custom')
@@ -24,7 +25,7 @@ backup=('etc/X11/xorg.conf.d/10-synaptics.conf')
 source=(#http://xorg.freedesktop.org/releases/individual/driver/${pkgname}-${pkgver}.tar.bz2
 		http://cgit.freedesktop.org/xorg/driver/xf86-input-synaptics/snapshot/xf86-input-synaptics-${_gitver}.tar.gz
         10-synaptics.conf)
-md5sums=('9676852145949e9d9afbd548057f37ab'
+md5sums=('cbd1c8bb1d54b21e2b888da9e5c211cc'
          '3b81a81b958dfe3cac3cdef7ee85f1ce')
 
 build() {
