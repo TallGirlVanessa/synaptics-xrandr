@@ -31,6 +31,7 @@ md5sums=('cbd1c8bb1d54b21e2b888da9e5c211cc'
 build() {
 #  cd "${srcdir}/${pkgname}-${pkgver}"
   cd ${srcdir}/${_pkgname}*
+  patch -p1 < ../synaptics-xrandr.patch || return 1
   autoreconf -fi
   ./configure --prefix=/usr
   make
