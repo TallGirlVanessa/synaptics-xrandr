@@ -6,12 +6,12 @@
 
 pkgname=xf86-input-synaptics-xrandr
 pkgver=1.5.99
-pkgrel=4
+pkgrel=5
 _upstreamname=xf86-input-synaptics
 _gitversion=dfc3a8ed713c2878407c6443c4d3092da3125e0c
 pkgdesc="Synaptics driver for notebook touchpads with patch to enable axis rotation."
 arch=('i686')
-url="http://xorg.freedesktop.org/"
+url="https://github.com/garaden/synaptics-xrandr/"
 license=('custom')
 groups=('xorg-drivers' 'xorg')
 depends=('libxtst')
