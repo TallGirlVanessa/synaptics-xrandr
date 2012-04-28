@@ -1,0 +1,165 @@
+From a47f1c132444a744d54a57d30dafb0011d32b5bf Mon Sep 17 00:00:00 2001
+Message-Id: <a47f1c132444a744d54a57d30dafb0011d32b5bf.1335581864.git.matthew.monaco@0x01b.net>
+From: Matthew Monaco <matthew.monaco@0x01b.net>
+Date: Thu, 19 Apr 2012 17:16:59 -0600
+Subject: [PATCH 1/2] Add rotation property, param, and docs
+
+The property can be any integral multiple of 90. The paramter
+is converted to 0, 90, 180, 270 counter-clockwise degrees.
+
+Co-authored-by: Aapo Rantalainen <aapo.rantalainen@gmail.com>
+---
+ include/synaptics-properties.h |    3 +++
+ man/synaptics.man              |   10 ++++++++++
+ src/properties.c               |   20 +++++++++++++++++++-
+ src/synaptics.c                |    1 +
+ src/synapticsstr.h             |    9 +++++++++
+ tools/synclient.c              |    1 +
+ 6 files changed, 43 insertions(+), 1 deletion(-)
+
+diff --git a/include/synaptics-properties.h b/include/synaptics-properties.h
+index 8c20a0c..c0cd732 100644
+--- a/include/synaptics-properties.h
++++ b/include/synaptics-properties.h
+@@ -164,4 +164,7 @@
+ /* 32 Bit Integer, 2 values, horizontal hysteresis, vertical hysteresis */
+ #define SYNAPTICS_PROP_NOISE_CANCELLATION "Synaptics Noise Cancellation"
+ 
++/* 32 bit, 1 value, degrees counter-clockwise rotation (any integral multiple of 90) */
++#define SYNAPTICS_PROP_ROTATION "Synaptics Rotation"
++
+ #endif /* _SYNAPTICS_PROPERTIES_H_ */
+diff --git a/man/synaptics.man b/man/synaptics.man
+index 110ad6c..d26b4ff 100644
+--- a/man/synaptics.man
++++ b/man/synaptics.man
+@@ -529,6 +529,10 @@ If any edge is set to 0, the button is assumed to extend to infinity in the
+ given direction. Setting all values to 0 disables soft button areas.
+ Property: "Synaptics Soft Button Areas"
+ .
++.TP
++.BI "Option \*qRotation\*q \*q" integer \*q
++A rotation specified as degrees counter-clockwise. Any integral multiple of
++90 degrees is valid.
+ 
+ .SH CONFIGURATION DETAILS
+ .SS Area handling
+@@ -982,6 +986,12 @@ right button, two-finger detection, three-finger detection, pressure detection,
+ .BI "Synaptics Pad Resolution"
+ 32 bit unsigned, 2 values (read-only), vertical, horizontal in units/millimeter.
+ 
++.TP 7
++.BI "Synaptics Rotation"
++A counter-clockwise rotation of the touchpad in degrees.
++
++32 bit, 1 value (any integral multiple of 90)
++
+ .SH "NOTES"
+ Configuration through
+ .I InputClass
+diff --git a/src/properties.c b/src/properties.c
+index 783b516..8967743 100644
+--- a/src/properties.c
++++ b/src/properties.c
+@@ -96,6 +96,7 @@ Atom prop_softbutton_areas      = 0;
+ Atom prop_noise_cancellation    = 0;
+ Atom prop_product_id            = 0;
+ Atom prop_device_node           = 0;
++Atom prop_rotation              = 0;
+ 
+ static Atom
+ InitTypedAtom(DeviceIntPtr dev, char *name, Atom type, int format, int nvalues,
+@@ -327,6 +328,9 @@ InitDeviceProperties(InputInfoPtr pInfo)
+     prop_noise_cancellation = InitAtom(pInfo->dev,
+             SYNAPTICS_PROP_NOISE_CANCELLATION, 32, 2, values);
+ 
++    prop_rotation = InitAtom(pInfo->dev,
++            SYNAPTICS_PROP_ROTATION, 32, 1, &para->rotation);
++
+     /* only init product_id property if we actually know them */
+     if (priv->id_vendor || priv->id_product)
+     {
+@@ -757,7 +761,8 @@ SetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
+ 
+         memcpy(para->softbutton_areas[0], areas, 4 * sizeof(int));
+         memcpy(para->softbutton_areas[1], areas + 4, 4 * sizeof(int));
+-    } else if (property == prop_noise_cancellation) {
++    } else if (property == prop_noise_cancellation)
++    {
+         INT32 *hyst;
+         if (prop->size != 2 || prop->format != 32 || prop->type != XA_INTEGER)
+             return BadMatch;
+@@ -767,6 +772,19 @@ SetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
+             return BadValue;
+         para->hyst_x = hyst[0];
+         para->hyst_y = hyst[1];
++    } else if (property == prop_rotation)
++    {
++        INT32 rot;
++        if (prop->size != 1 || prop->format != 32 || prop->type != XA_INTEGER)
++            return BadMatch;
++
++        rot = *(INT32*)prop->data;
++        if (rot % ROTATION_CCW_90 != 0)
++            return BadValue;
++        /* internally, only 0, 90, 180, and 270 are used */
++        para->rotation = ( (rot/ROTATION_CCW_90)
++                          %(ROTATION_CCW_360/ROTATION_CCW_90)
++                         ) * ROTATION_CCW_90;
+     } else if (property == prop_product_id || property == prop_device_node)
+         return BadValue; /* read-only */
+ 
+diff --git a/src/synaptics.c b/src/synaptics.c
+index 51ecda5..f5c2261 100644
+--- a/src/synaptics.c
++++ b/src/synaptics.c
+@@ -764,6 +764,7 @@ static void set_default_parameters(InputInfoPtr pInfo)
+     pars->tap_and_drag_gesture = xf86SetBoolOption(opts, "TapAndDragGesture", TRUE);
+     pars->resolution_horiz = xf86SetIntOption(opts, "HorizResolution", horizResolution);
+     pars->resolution_vert = xf86SetIntOption(opts, "VertResolution", vertResolution);
++    pars->rotation = xf86SetIntOption(opts, "Rotation", ROTATION_CCW_0);
+ 
+     /* Warn about (and fix) incorrectly configured TopEdge/BottomEdge parameters */
+     if (pars->top_edge > pars->bottom_edge) {
+diff --git a/src/synapticsstr.h b/src/synapticsstr.h
+index 14ae362..98288a3 100644
+--- a/src/synapticsstr.h
++++ b/src/synapticsstr.h
+@@ -118,6 +118,14 @@ enum TouchpadModel {
+     MODEL_ELANTECH
+ };
+ 
++enum {
++    ROTATION_CCW_0   = 0,
++    ROTATION_CCW_90  = 90,
++    ROTATION_CCW_180 = 180,
++    ROTATION_CCW_270 = 270,
++    ROTATION_CCW_360 = 360
++};
++
+ typedef struct _SynapticsParameters
+ {
+     /* Parameter data */
+@@ -184,6 +192,7 @@ typedef struct _SynapticsParameters
+     int area_left_edge, area_right_edge, area_top_edge, area_bottom_edge; /* area coordinates absolute */
+     int softbutton_areas[2][4];             /* soft button area coordinates, 0 => right, 1 => middle button */
+     int hyst_x, hyst_y;                     /* x and y width of hysteresis box */
++    int rotation;                           /* Counter-clockwise degrees to rotate touchpad */
+ } SynapticsParameters;
+ 
+ 
+diff --git a/tools/synclient.c b/tools/synclient.c
+index 6c8ee7a..fedf2f8 100644
+--- a/tools/synclient.c
++++ b/tools/synclient.c
+@@ -154,6 +154,7 @@ static struct Parameter params[] = {
+     {"MiddleButtonAreaRight", PT_INT, INT_MIN, INT_MAX, SYNAPTICS_PROP_SOFTBUTTON_AREAS,	32,	5},
+     {"MiddleButtonAreaTop",   PT_INT, INT_MIN, INT_MAX, SYNAPTICS_PROP_SOFTBUTTON_AREAS,	32,	6},
+     {"MiddleButtonAreaBottom", PT_INT, INT_MIN, INT_MAX, SYNAPTICS_PROP_SOFTBUTTON_AREAS,	32,	7},
++    {"Rotation",              PT_INT, INT_MIN, INT_MAX, SYNAPTICS_PROP_ROTATION,	32,	0},
+     { NULL, 0, 0, 0, 0 }
+ };
+ 
+-- 
+1.7.10
+

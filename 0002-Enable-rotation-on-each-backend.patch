@@ -1,0 +1,189 @@
+From a08b25f114cb9f4de650878868b3ba1e9a571fe0 Mon Sep 17 00:00:00 2001
+Message-Id: <a08b25f114cb9f4de650878868b3ba1e9a571fe0.1335581864.git.matthew.monaco@0x01b.net>
+In-Reply-To: <a47f1c132444a744d54a57d30dafb0011d32b5bf.1335581864.git.matthew.monaco@0x01b.net>
+References: <a47f1c132444a744d54a57d30dafb0011d32b5bf.1335581864.git.matthew.monaco@0x01b.net>
+From: Matthew Monaco <matthew.monaco@0x01b.net>
+Date: Thu, 19 Apr 2012 22:09:17 -0600
+Subject: [PATCH 2/2] Enable rotation on each backend
+
+I don't know where to put (and so how to declare) the rotation
+functions. I'm also not convinced that for the ev backend, the
+apply_st_scaling() axis is correct.
+
+Co-authored-by: Aapo Rantalainen <aapo.rantalainen@gmail.com>
+Co-authored-by: Christoph Brill <egore911@egore911.de>
+---
+ src/alpscomm.c     |   10 ++++++----
+ src/eventcomm.c    |    7 +++++--
+ src/properties.c   |    2 ++
+ src/ps2comm.c      |    3 +++
+ src/synaptics.c    |   10 ++++++++--
+ src/synapticsstr.h |   40 ++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 64 insertions(+), 8 deletions(-)
+
+diff --git a/src/alpscomm.c b/src/alpscomm.c
+index 8988e6b..35850b6 100644
+--- a/src/alpscomm.c
++++ b/src/alpscomm.c
+@@ -149,7 +149,8 @@ ALPS_get_packet(struct CommData *comm, InputInfoPtr pInfo)
+  * reflects left,right,down,up in lef1,rig1,mid1,up1.
+  */
+ static void
+-ALPS_process_packet(unsigned char *packet, struct SynapticsHwState *hw)
++ALPS_process_packet(SynapticsPrivate *priv, unsigned char *packet,
++                    struct SynapticsHwState *hw)
+ {
+     int x = 0, y = 0, z = 0;
+     int left = 0, right = 0, middle = 0;
+@@ -174,8 +175,8 @@ ALPS_process_packet(unsigned char *packet, struct SynapticsHwState *hw)
+ 	hw->multi[i] = FALSE;
+ 
+     if (z > 0) {
+-	hw->x = x;
+-	hw->y = y;
++        ROTATE_HORIZ(priv, hw, x);
++        ROTATE_VERT(priv, hw, y);
+     }
+     hw->z = z;
+     hw->numFingers = (z > 0) ? 1 : 0;
+@@ -212,11 +213,12 @@ ALPSReadHwState(InputInfoPtr pInfo,
+ {
+     unsigned char *buf = comm->protoBuf;
+     struct SynapticsHwState *hw = comm->hwState;
++    SynapticsPrivate *priv = (SynapticsPrivate *)pInfo->private;
+ 
+     if (!ALPS_get_packet(comm, pInfo))
+ 	return FALSE;
+ 
+-    ALPS_process_packet(buf, hw);
++    ALPS_process_packet(priv, buf, hw);
+ 
+     SynapticsCopyHwState(hwRet, hw);
+     return TRUE;
+diff --git a/src/eventcomm.c b/src/eventcomm.c
+index 741f988..ef76a75 100644
+--- a/src/eventcomm.c
++++ b/src/eventcomm.c
+@@ -661,6 +661,7 @@ EventReadHwState(InputInfoPtr pInfo,
+     SynapticsPrivate *priv = (SynapticsPrivate *)pInfo->private;
+     SynapticsParameters *para = &priv->synpara;
+     struct eventcomm_proto_data *proto_data = priv->proto_data;
++    int axis;
+ 
+     SynapticsResetTouchHwState(hw);
+ 
+@@ -743,10 +744,12 @@ EventReadHwState(InputInfoPtr pInfo,
+ 	    if (ev.code < ABS_MT_SLOT) {
+ 		switch (ev.code) {
+ 		case ABS_X:
+-		    hw->x = apply_st_scaling(proto_data, ev.value, 0);
++		    axis = (para->rotation % ROTATION_CCW_180 == 0) ? 1 : 0;
++		    ROTATE_HORIZ(priv, hw, apply_st_scaling(proto_data, ev.value, axis));
+ 		    break;
+ 		case ABS_Y:
+-		    hw->y = apply_st_scaling(proto_data, ev.value, 1);
++		    axis = (para->rotation % ROTATION_CCW_180 == 0) ? 0 : 1;
++		    ROTATE_VERT(priv, hw, apply_st_scaling(proto_data, ev.value, axis));
+ 		    break;
+ 		case ABS_PRESSURE:
+ 		    hw->z = ev.value;
+diff --git a/src/properties.c b/src/properties.c
+index 8967743..0489ff0 100644
+--- a/src/properties.c
++++ b/src/properties.c
+@@ -785,6 +785,8 @@ SetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
+         para->rotation = ( (rot/ROTATION_CCW_90)
+                           %(ROTATION_CCW_360/ROTATION_CCW_90)
+                          ) * ROTATION_CCW_90;
++        if (para->rotation < 0)
++            para->rotation += ROTATION_CCW_360;
+     } else if (property == prop_product_id || property == prop_device_node)
+         return BadValue; /* read-only */
+ 
+diff --git a/src/ps2comm.c b/src/ps2comm.c
+index 5b34414..dc2310c 100644
+--- a/src/ps2comm.c
++++ b/src/ps2comm.c
+@@ -615,6 +615,9 @@ PS2ReadHwStateProto(InputInfoPtr pInfo,
+ 
+     hw->y = YMAX_NOMINAL + YMIN_NOMINAL - hw->y;
+ 
++    ROTATE_HORIZ(priv, hw, hw->x);
++    ROTATE_VERT(priv,  hw, hw->y);
++
+     if (hw->z >= para->finger_high) {
+ 	int w_ok = 0;
+ 	/*
+diff --git a/src/synaptics.c b/src/synaptics.c
+index f5c2261..ec65660 100644
+--- a/src/synaptics.c
++++ b/src/synaptics.c
+@@ -3347,8 +3347,14 @@ ScaleCoordinates(SynapticsPrivate *priv, struct SynapticsHwState *hw)
+     int xCenter = (priv->synpara.left_edge + priv->synpara.right_edge) / 2;
+     int yCenter = (priv->synpara.top_edge + priv->synpara.bottom_edge) / 2;
+ 
+-    hw->x = (hw->x - xCenter) * priv->horiz_coeff + xCenter;
+-    hw->y = (hw->y - yCenter) * priv->vert_coeff + yCenter;
++    if (priv->synpara.rotation == ROTATION_CCW_0 ||
++        priv->synpara.rotation == ROTATION_CCW_180) {
++        hw->x = (hw->x - xCenter) * priv->horiz_coeff + xCenter;
++        hw->y = (hw->y - yCenter) * priv->vert_coeff  + yCenter;
++    } else {
++        hw->x = (hw->x - xCenter) * priv->vert_coeff  + xCenter;
++        hw->y = (hw->y - yCenter) * priv->horiz_coeff + yCenter;
++    }
+ }
+ 
+ void
+diff --git a/src/synapticsstr.h b/src/synapticsstr.h
+index 98288a3..e319093 100644
+--- a/src/synapticsstr.h
++++ b/src/synapticsstr.h
+@@ -303,4 +303,44 @@ struct _SynapticsPrivateRec
+ #endif
+ };
+ 
++static void
++ROTATE_HORIZ(SynapticsPrivate *priv, struct SynapticsHwState *hw, int x)
++{
++    SynapticsParameters *para = &priv->synpara;
++
++    if (para->rotation == ROTATION_CCW_90)
++        hw->y = (x - priv->minx) * (priv->maxy - priv->miny)
++              / (priv->maxx - priv->minx) + priv->miny;
++
++    else if (para->rotation == ROTATION_CCW_180)
++        hw->x = priv->maxx + priv->minx - x;
++
++    else if (para->rotation == ROTATION_CCW_270)
++        hw->y = (priv->maxx - x) * (priv->maxy - priv->miny)
++              / (priv->maxx - priv->minx) + priv->miny;
++
++    else
++        hw->x = x;
++}
++
++static void
++ROTATE_VERT(SynapticsPrivate *priv, struct SynapticsHwState *hw, int y)
++{
++    SynapticsParameters *para = &priv->synpara;
++
++    if (para->rotation == ROTATION_CCW_90)
++        hw->x = (priv->maxy - y) * (priv->maxx - priv->minx)
++              / (priv->maxy - priv->miny) + priv->minx;
++
++    else if (para->rotation == ROTATION_CCW_180)
++        hw->y = priv->maxy + priv->miny - y;
++
++    else if (para->rotation == ROTATION_CCW_270)
++        hw->x = (y - priv->miny) * (priv->maxx - priv->minx)
++              / (priv->maxy - priv->miny) + priv->minx;
++
++    else
++        hw->y = y;
++}
++
+ #endif /* _SYNAPTICSSTR_H_ */
+-- 
+1.7.10
+

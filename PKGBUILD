@@ -1,47 +1,49 @@
 # Maintainer: Matt Phipps <mphipps1@umd.edu>
+# Contributor: Matthew Monaco <net 0x01b dgbaley27>
 # Contributor: Tobias Powalowski  <tpowa@archlinux.org>
 # Contributor: Thomas Bächler <thomas@archlinux.org>
 # Contributor: Alexander Baldeck <alexander@archlinux.org>
 # Contributor: Kaspar Bumke <kaspar.bumke@gmail.com>
 
-pkgname=xf86-input-synaptics-xrandr
-pkgver=1.5.99
-pkgrel=5
-_upstreamname=xf86-input-synaptics
-_gitversion=dfc3a8ed713c2878407c6443c4d3092da3125e0c
-pkgdesc="Synaptics driver for notebook touchpads with patch to enable axis rotation."
-arch=('i686')
-url="https://github.com/garaden/synaptics-xrandr/"
+_pkgname=xf86-input-synaptics
+pkgname=$_pkgname-xrandr
+pkgver=1.5.99.904
+pkgrel=1
+pkgdesc="Synaptics driver for notebook touchpads (with Rotation support)."
+arch=('i686' 'x86_64')
 license=('custom')
+url="https://github.com/garaden/synaptics-xrandr/"
+depends=('libxtst' 'mtdev')
+makedepends=('xorg-server-devel>=1.11.99.902' 'libxi' 'libx11')
+conflicts=('xorg-server<1.11.99.902')
+replaces=('synaptics')
+provides=('synaptics' "${_pkgname}")
+conflicts=('synaptics' "${_pkgname}")
 groups=('xorg-drivers' 'xorg')
-depends=('libxtst')
-makedepends=('xorg-server-devel>=1.12.1-1' 'libxi' 'libx11')
-provides=('synaptics')
-conflicts=('xorg-server<1.12.1-1' 'synaptics' 'synaptics-xrandr')
-replaces=('synaptics-xrandr')
-backup=('etc/X11/xorg.conf.d/10-synaptics.conf')
 options=(!libtool)
-source=(
-http://cgit.freedesktop.org/xorg/driver/${_upstreamname}/snapshot/${_upstreamname}-${_gitversion}.tar.gz
-10-synaptics.conf
-synaptics-xrandr.patch)
-md5sums=('96824ee4e6c720cd3081a8c13761fbe3'
-         '3b81a81b958dfe3cac3cdef7ee85f1ce'
-         '99da8bd1dbacfe9a29ae2d38a9cd9238')
+backup=('etc/X11/xorg.conf.d/50-synaptics.conf')
+source=(http://xorg.freedesktop.org/releases/individual/driver/${_pkgname}-${pkgver}.tar.bz2
+        0001-Add-rotation-property-param-and-docs.patch
+        0002-Enable-rotation-on-each-backend.patch)
+md5sums=('8c07650a79b160c8f04470219bf1bd84'
+         'a79e16dfc57f1605375f219542b4c481'
+         '717e00920693105e5a7497ac4f00caa6')
 
 build() {
-  cd ${srcdir}/${_upstreamname}*
-  patch -p1 < ../synaptics-xrandr.patch || return 1
-  autoreconf -fi
+  cd "${srcdir}/${_pkgname}-${pkgver}"
+  for p in ../*.patch; do
+    msg2 "Applying patch: $p"
+    patch -p1 -i "$p"
+  done
   ./configure --prefix=/usr
   make
 }
 
 package() {
-  cd ${srcdir}/${_upstreamname}*
+  cd "${srcdir}/${_pkgname}-${pkgver}"
   make DESTDIR="${pkgdir}" install
   install -m755 -d "${pkgdir}/etc/X11/xorg.conf.d"
-  install -m644 "${srcdir}/10-synaptics.conf" "${pkgdir}/etc/X11/xorg.conf.d/"
+  install -m644 "conf/50-synaptics.conf" "${pkgdir}/etc/X11/xorg.conf.d/"
   install -m755 -d "${pkgdir}/usr/share/licenses/${pkgname}"
   install -m644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/"
 
